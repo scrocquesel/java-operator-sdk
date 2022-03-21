@@ -3,8 +3,13 @@ package io.javaoperatorsdk.operator.processing.event.source.informer;
 import java.util.Optional;
 import java.util.Set;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestInstance.Lifecycle;
+import org.mockito.Mockito;
 
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
@@ -22,6 +27,7 @@ import io.javaoperatorsdk.operator.sample.simple.TestCustomResource;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+@TestInstance(Lifecycle.PER_CLASS)
 class InformerEventSourceTest {
 
   private static final String PREV_RESOURCE_VERSION = "0";
@@ -38,11 +44,11 @@ class InformerEventSourceTest {
       mock(FilterWatchListMultiDeletable.class);
   private FilterWatchListDeletable labeledResourceClientMock = mock(FilterWatchListDeletable.class);
   private SharedIndexInformer informer = mock(SharedIndexInformer.class);
-  private InformerConfiguration<Deployment, TestCustomResource> informerConfiguration =
-      mock(InformerConfiguration.class);
+  private InformerConfiguration<Deployment, TestCustomResource> informerConfiguration = mock(
+      InformerConfiguration.class);
 
-  @BeforeEach
-  void setup() {
+  @BeforeAll
+  void setupAll() {
     when(clientMock.resources(any())).thenReturn(crClientMock);
     when(crClientMock.inAnyNamespace()).thenReturn(specificResourceClientMock);
     when(specificResourceClientMock.withLabelSelector((String) null))
@@ -52,15 +58,26 @@ class InformerEventSourceTest {
     when(informerConfiguration.getPrimaryResourcesRetriever())
         .thenReturn(mock(SecondaryToPrimaryMapper.class));
 
-    informerEventSource = new InformerEventSource<>(informerConfiguration, clientMock);
-    informerEventSource.setTemporalResourceCache(temporaryResourceCacheMock);
-    informerEventSource.setEventHandler(eventHandlerMock);
-
     SecondaryToPrimaryMapper secondaryToPrimaryMapper = mock(SecondaryToPrimaryMapper.class);
     when(informerConfiguration.getPrimaryResourcesRetriever())
         .thenReturn(secondaryToPrimaryMapper);
     when(secondaryToPrimaryMapper.associatedPrimaryResources(any()))
         .thenReturn(Set.of(ResourceID.fromResource(testDeployment())));
+
+    informerEventSource = new InformerEventSource<>(informerConfiguration, clientMock);
+    informerEventSource.setTemporalResourceCache(temporaryResourceCacheMock);
+    informerEventSource.setEventHandler(eventHandlerMock);
+  }
+
+  @BeforeEach
+  void setup() {
+    Mockito.clearInvocations(eventHandlerMock, temporaryResourceCacheMock);
+    informerEventSource.start();
+  }
+
+  @AfterEach
+  void tearDown() {
+    informerEventSource.stop();
   }
 
   @Test
@@ -81,7 +98,6 @@ class InformerEventSourceTest {
     when(temporaryResourceCacheMock.getResourceFromCache(any()))
         .thenReturn(Optional.of(cachedDeployment));
 
-
     informerEventSource.onUpdate(cachedDeployment, testDeployment());
 
     verify(eventHandlerMock, times(1)).handleEvent(any());
@@ -94,7 +110,6 @@ class InformerEventSourceTest {
     var prevTestDeployment = testDeployment();
     prevTestDeployment.getMetadata().setResourceVersion(PREV_RESOURCE_VERSION);
 
-
     informerEventSource
         .prepareForCreateOrUpdateEventFiltering(ResourceID.fromResource(testDeployment),
             testDeployment);
@@ -105,7 +120,6 @@ class InformerEventSourceTest {
     verify(eventHandlerMock, times(0)).handleEvent(any());
     verify(temporaryResourceCacheMock, times(0)).unconditionallyCacheResource(any());
   }
-
 
   @Test
   void notPropagatesEventIfAfterCreateReceivedJustTheRelatedEvent() {

@@ -1,7 +1,10 @@
 package io.javaoperatorsdk.operator.processing.event.source.informer;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import io.fabric8.kubernetes.api.model.HasMetadata;
@@ -15,22 +18,30 @@ import io.javaoperatorsdk.operator.processing.event.source.UpdatableCache;
 
 class InformerWrapper<T extends HasMetadata>
     implements LifecycleAware, ResourceCache<T>, UpdatableCache<T> {
-  private final SharedIndexInformer<T> informer;
-  private final InformerResourceCache<T> cache;
+  private final Supplier<SharedIndexInformer<T>> informerSupplier;
+  private final List<ResourceEventHandler<T>> eventHandlers = new ArrayList<>();
+  private InformerResourceCache<T> cache;
+  private SharedIndexInformer<T> informer;
 
-  public InformerWrapper(SharedIndexInformer<T> informer) {
-    this.informer = informer;
-    this.cache = new InformerResourceCache<>(informer);
+  public InformerWrapper(Supplier<SharedIndexInformer<T>> informerSupplier) {
+    this.informerSupplier = informerSupplier;
   }
 
   @Override
   public void start() throws OperatorException {
+    informer = informerSupplier.get();
+    eventHandlers.forEach(eh -> informer.addEventHandler(eh));
+    cache = new InformerResourceCache<>(informer);
     informer.run();
   }
 
   @Override
   public void stop() throws OperatorException {
-    informer.stop();
+    if (informer != null) {
+      informer.stop();
+      informer = null;
+      cache = null;
+    }
   }
 
   @Override
@@ -69,7 +80,10 @@ class InformerWrapper<T extends HasMetadata>
   }
 
   public void addEventHandler(ResourceEventHandler<T> eventHandler) {
-    informer.addEventHandler(eventHandler);
+    eventHandlers.add(eventHandler);
+    if (informer != null) {
+      informer.addEventHandler(eventHandler);
+    }
   }
 
   @Override
@@ -81,5 +95,4 @@ class InformerWrapper<T extends HasMetadata>
   public void put(ResourceID key, T resource) {
     cache.put(key, resource);
   }
-
 }
