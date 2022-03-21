@@ -176,7 +176,8 @@ public class Controller<P extends HasMetadata> implements Reconciler<P>, Cleaner
           @Override
           public UpdateControl<P> execute() throws Exception {
             initContextIfNeeded(resource, context);
-            dependents.forEach(dependent -> dependent.reconcile(resource, context));
+            dependents.forEach(dependent -> context.managedDependentResourceContext()
+                .setReconcileResult(dependent, dependent.reconcile(resource, context)));
             return reconciler.reconcile(resource, context);
           }
         });

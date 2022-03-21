@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 
 import io.javaoperatorsdk.operator.OperatorException;
 import io.javaoperatorsdk.operator.api.reconciler.dependent.DependentResource;
+import io.javaoperatorsdk.operator.api.reconciler.dependent.ReconcileResult;
 
 /**
  * Contextual information related to {@link DependentResource} either to retrieve the actual
@@ -18,6 +19,8 @@ public class ManagedDependentResourceContext {
 
   private final List<DependentResource> dependentResources;
   private final ConcurrentHashMap attributes = new ConcurrentHashMap();
+  private final ConcurrentHashMap<DependentResource<?, ?>, ReconcileResult<?>> reconcileResults =
+      new ConcurrentHashMap<>();
 
   /**
    * Retrieve a contextual object, if it exists and is of the specified expected type, associated
@@ -108,5 +111,31 @@ public class ManagedDependentResourceContext {
           "More than one dependent resource found for class: " + resourceClass.getName());
     }
     return (T) resourceList.get(0);
+  }
+
+  /**
+   * Retrieve a reconcile result of the specified dependent resource implementation.
+   *
+   * @param dependentResource the dependent resource implementation
+   * @return an Optional containing the reconcile result or {@link Optional#empty()} if no such
+   *         object exists
+   */
+  @SuppressWarnings("unchecked")
+  public <R, T extends DependentResource<R, ?>> Optional<ReconcileResult<R>> getReconcileResult(
+      DependentResource<R, ?> dependentResource) {
+    return Optional.ofNullable(reconcileResults.get(dependentResource))
+        .map(r -> (ReconcileResult<R>) r);
+  }
+
+  /**
+   * Set a reconcile result of the specified dependent resource implementation.
+   *
+   * @param dependentResource the dependent resource implementation
+   * @param reconcileResult the reconcile result to add to the context associated with the specified
+   *        dependent resource
+   */
+  public <R, T extends DependentResource<R, ?>> void setReconcileResult(
+      DependentResource<R, ?> dependentResource, ReconcileResult<R> reconcileResult) {
+    reconcileResults.put(dependentResource, reconcileResult);
   }
 }
