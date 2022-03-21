@@ -1,5 +1,7 @@
 package io.javaoperatorsdk.operator.processing;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
@@ -52,8 +54,8 @@ public class Controller<P extends HasMetadata> implements Reconciler<P>, Cleaner
   private final KubernetesClient kubernetesClient;
   private final EventSourceManager<P> eventSourceManager;
   private final List<DependentResource> dependents;
+  private final List<Deleter<P>> deleterDependentSubset;
   private final boolean contextInitializer;
-  private final boolean hasDeleterDependents;
   private final boolean isCleaner;
   private final Metrics metrics;
 
@@ -67,25 +69,23 @@ public class Controller<P extends HasMetadata> implements Reconciler<P>, Cleaner
     this.metrics = Optional.ofNullable(ConfigurationServiceProvider.instance().getMetrics())
         .orElse(Metrics.NOOP);
     contextInitializer = reconciler instanceof ContextInitializer;
+    isCleaner = reconciler instanceof Cleaner;
 
     eventSourceManager = new EventSourceManager<>(this);
 
-    final var hasDeleterHolder = new boolean[] {false};
+    final List<Deleter<P>> deleters = new ArrayList<>(configuration.getDependentResources().size());
     dependents = configuration.getDependentResources().stream()
         .map(drs -> createAndConfigureFrom(drs, kubernetesClient))
         .peek(d -> {
-          // check if any dependent implements Deleter to record that fact
-          if (!hasDeleterHolder[0] && d instanceof Deleter) {
-            hasDeleterHolder[0] = true;
+          // collect Deleter in the same iteration
+          if (d instanceof Deleter<?>) {
+            deleters.add((Deleter<P>) d);
           }
         })
         .collect(Collectors.toList());
-
-    hasDeleterDependents = hasDeleterHolder[0];
-    isCleaner = reconciler instanceof Cleaner;
+    deleterDependentSubset = Collections.unmodifiableList(deleters);
   }
 
-  @SuppressWarnings("rawtypes")
   private DependentResource createAndConfigureFrom(DependentResourceSpec spec,
       KubernetesClient client) {
     final var dependentResource =
@@ -132,11 +132,8 @@ public class Controller<P extends HasMetadata> implements Reconciler<P>, Cleaner
                 @Override
                 public DeleteControl execute() {
                   initContextIfNeeded(resource, context);
-                  if (hasDeleterDependents) {
-                    dependents.stream()
-                        .filter(d -> d instanceof Deleter)
-                        .map(Deleter.class::cast)
-                        .forEach(deleter -> deleter.delete(resource, context));
+                  if (!deleterDependentSubset.isEmpty()) {
+                    deleterDependentSubset.forEach(deleter -> deleter.delete(resource, context));
                   }
                   if (isCleaner) {
                     return ((Cleaner<P>) reconciler).cleanup(resource, context);
@@ -326,10 +323,9 @@ public class Controller<P extends HasMetadata> implements Reconciler<P>, Cleaner
   }
 
   public boolean useFinalizer() {
-    return isCleaner || hasDeleterDependents;
+    return isCleaner || !deleterDependentSubset.isEmpty();
   }
 
-  @SuppressWarnings("rawtypes")
   public List<DependentResource> getDependents() {
     return dependents;
   }
